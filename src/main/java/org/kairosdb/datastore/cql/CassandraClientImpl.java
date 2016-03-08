@@ -1,15 +1,12 @@
-package org.kairosdb.datastore.cassandra;
+package org.kairosdb.datastore.cql;
 
 import com.datastax.driver.core.Cluster;
-import com.datastax.driver.core.ConsistencyLevel;
 import com.datastax.driver.core.QueryOptions;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import com.datastax.driver.core.policies.TokenAwarePolicy;
 import com.google.inject.Inject;
 import com.google.inject.name.Named;
-
-import java.util.List;
 
 /**
  Created by bhawkins on 3/4/15.

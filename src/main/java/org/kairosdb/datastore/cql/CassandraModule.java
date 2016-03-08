@@ -14,7 +14,7 @@
  *    limitations under the License.
  */
 
-package org.kairosdb.datastore.cassandra;
+package org.kairosdb.datastore.cql;
 
 import com.google.inject.AbstractModule;
 import com.google.inject.Scopes;
@@ -68,6 +68,7 @@ public class CassandraModule extends AbstractModule
 		bind(CleanRowKeyCache.class).in(Scopes.SINGLETON);
 		bind(HectorConfiguration.class).in(Scopes.SINGLETON);
 		bind(CassandraConfiguration.class).in(Scopes.SINGLETON);
+		bind(CassandraClient.class).to(CassandraClientImpl.class);
 
 		bind(new TypeLiteral<List<RowKeyListener>>(){}).toProvider(RowKeyListenerProvider.class);
 

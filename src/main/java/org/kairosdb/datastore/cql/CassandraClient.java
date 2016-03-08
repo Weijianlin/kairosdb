@@ -1,4 +1,4 @@
-package org.kairosdb.datastore.cassandra;
+package org.kairosdb.datastore.cql;
 
 import com.datastax.driver.core.Session;
 
