@@ -8,7 +8,7 @@ import java.util.Iterator;
 /**
  Created by bhawkins on 11/23/14.
  */
-public interface CassandraRowKeyPlugin extends QueryPlugin
+public interface CQLRowKeyPlugin extends QueryPlugin
 {
 	/**
 	 Must return the row keys for a query grouped by time

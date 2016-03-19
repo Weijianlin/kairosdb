@@ -15,124 +15,158 @@
  */
 package org.kairosdb.datastore.cql;
 
-import java.nio.ByteBuffer;
+import com.google.common.collect.Maps;
+import org.kairosdb.util.StringPool;
+
+import javax.validation.constraints.NotNull;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static org.kairosdb.util.Preconditions.checkNotNullOrEmpty;
 
-public class DataPointsRowKey
-{
-	private final String m_metricName;
-	private final long m_timestamp;
-	private final String m_dataType;
-	private final SortedMap<String, String> m_tags;
-	private boolean m_endSearchKey; //Only used for end slice operations.  Serialization
-		//adds a 0xFF after the timestamp to make sure we get all data for that timestamp.
+public class DataPointsRowKey {
+    private static final StringPool STRING_POOL = new StringPool();
 
-	private ByteBuffer m_serializedBuffer;
 
-	public DataPointsRowKey(String metricName, long timestamp, String dataType)
-	{
-		this(metricName, timestamp, dataType, new TreeMap<String, String>());
+    private final String metric;
+	private final int year;
+    private final String tagsString;
+	private SortedMap<String, String> tags;
+
+
+	public DataPointsRowKey(String metric, int year) {
+		this(metric, year, "");
 	}
 
-	public DataPointsRowKey(String metricName, long timestamp, String datatype,
-			SortedMap<String, String> tags)
-	{
-		m_metricName = checkNotNullOrEmpty(metricName);
-		m_timestamp = timestamp;
-		m_dataType = checkNotNull(datatype);
-		m_tags = tags;
-
+	public DataPointsRowKey(String metric, int year,
+			SortedMap<String, String> tags) {
+		this.metric = checkNotNullOrEmpty(metric);
+		this.year = year;
+		this.tags = checkNotNull(tags, "tags");
+        this.tagsString = generateTagString(tags);
 	}
+
+    public DataPointsRowKey(String metric, int year, String tagsString) {
+        this.metric = checkNotNullOrEmpty(metric);
+        this.year = year;
+        this.tagsString = checkNotNull(tagsString, "tagsString");
+    }
 
 	public void addTag(String name, String value)
 	{
-		m_tags.put(name, value);
+		tags.put(name, value);
 	}
 
-	public String getMetricName()
+	public @NotNull String getMetric() {
+		return metric;
+	}
+
+	public @NotNull SortedMap<String, String> getTags() {
+        if (tags == null){
+            tags = extractTags(tagsString);
+        }
+		return tags;
+	}
+
+	public int getYear()
 	{
-		return m_metricName;
+		return year;
 	}
 
-	public SortedMap<String, String> getTags()
-	{
-		return m_tags;
-	}
+    public @NotNull String getTagsString(){
+        return tagsString;
+    }
 
-	public long getTimestamp()
-	{
-		return m_timestamp;
-	}
 
-	public boolean isEndSearchKey()
-	{
-		return m_endSearchKey;
-	}
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof DataPointsRowKey)) return false;
 
-	public void setEndSearchKey(boolean endSearchKey)
-	{
-		m_endSearchKey = endSearchKey;
-	}
+        DataPointsRowKey that = (DataPointsRowKey) o;
 
-	/**
-	 If this returns "" (empty string)` then it is the old row key format and the data type
-	 is determined by the timestamp bit in the column.
-	 @return
-	 */
-	public String getDataType()
-	{
-		return m_dataType;
-	}
+        return year == that.year
+                && metric.equals(that.metric)
+                && tagsString.equals(that.tagsString);
+    }
 
-	@Override
-	public boolean equals(Object o)
-	{
-		if (this == o) return true;
-		if (o == null || getClass() != o.getClass()) return false;
+    @Override
+    public int hashCode() {
+        int result = metric.hashCode();
+        result = 31 * result + year;
+        result = 31 * result + tagsString.hashCode();
+        return result;
+    }
 
-		DataPointsRowKey that = (DataPointsRowKey) o;
+    public static String generateTagString(SortedMap<String, String> tags) {
+        StringBuilder sb = new StringBuilder();
+        tags.entrySet().forEach(e -> sb.append(e.getKey()).append('=').append(e.getValue()).append(';'));
+        return getString(sb.substring(0, sb.length() - 1));
+    }
 
-		if (m_timestamp != that.m_timestamp) return false;
-		if (m_dataType != null ? !m_dataType.equals(that.m_dataType) : that.m_dataType != null)
-			return false;
-		if (!m_metricName.equals(that.m_metricName)) return false;
-		if (!m_tags.equals(that.m_tags)) return false;
+    public static void extractTags(DataPointsRowKey rowKey, String tagString) {
+        int mark = 0;
+        int position = 0;
+        String tag = null;
+        String value;
 
-		return true;
-	}
+        for (position = 0; position < tagString.length(); position ++) {
+            if (tag == null) {
+                if (tagString.charAt(position) == '=') {
+                    tag = tagString.substring(mark, position);
+                    mark = position +1;
+                }
+            }
+            else {
+                if (tagString.charAt(position) == ':'){
+                    value = tagString.substring(mark, position);
+                    mark = position +1;
 
-	@Override
-	public int hashCode()
-	{
-		int result = m_metricName.hashCode();
-		result = 31 * result + (int) (m_timestamp ^ (m_timestamp >>> 32));
-		result = 31 * result + (m_dataType != null ? m_dataType.hashCode() : 0);
-		result = 31 * result + m_tags.hashCode();
-		return result;
-	}
+                    rowKey.addTag(getString(tag), getString(value));
+                    tag = null;
+                }
+            }
+        }
+    }
 
-	@Override
-	public String toString()
-	{
-		return "DataPointsRowKey{" +
-				"m_metricName='" + m_metricName + '\'' +
-				", m_timestamp=" + m_timestamp +
-				", m_dataType='" + m_dataType + '\'' +
-				", m_tags=" + m_tags +
-				'}';
-	}
+    public static SortedMap<String, String> extractTags(String tagString){
+        SortedMap<String, String> map = Maps.newTreeMap();
+        int mark = 0;
+        int position = 0;
+        String tag = null;
+        String value;
 
-	public ByteBuffer getSerializedBuffer()
-	{
-		return m_serializedBuffer;
-	}
+        for (position = 0; position < tagString.length(); position ++) {
+            if (tag == null) {
+                if (tagString.charAt(position) == '=') {
+                    tag = tagString.substring(mark, position);
+                    mark = position +1;
+                }
+            }
+            else {
+                if (tagString.charAt(position) == ':'){
+                    value = tagString.substring(mark, position);
+                    mark = position +1;
 
-	public void setSerializedBuffer(ByteBuffer serializedBuffer)
-	{
-		m_serializedBuffer = serializedBuffer;
-	}
+                    map.put(getString(tag), getString(value));
+                    tag = null;
+                }
+            }
+        }
+        return map;
+    }
+
+
+    /**
+     If we are pooling strings the string from the pool will be returned.
+     @param str string
+     @return returns the string or what's in the string pool if using a string pool
+     */
+    private static String getString(String str) {
+        if (STRING_POOL != null)
+            return (STRING_POOL.getString(str));
+        else
+            return (str);
+    }
 }

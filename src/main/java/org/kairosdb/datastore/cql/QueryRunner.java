@@ -15,187 +15,229 @@
  */
 package org.kairosdb.datastore.cql;
 
-import me.prettyprint.cassandra.serializers.BytesArraySerializer;
-import me.prettyprint.cassandra.serializers.IntegerSerializer;
-import me.prettyprint.hector.api.Keyspace;
-import me.prettyprint.hector.api.beans.HColumn;
-import me.prettyprint.hector.api.beans.Row;
-import me.prettyprint.hector.api.beans.Rows;
-import me.prettyprint.hector.api.factory.HFactory;
-import me.prettyprint.hector.api.query.MultigetSliceQuery;
-import me.prettyprint.hector.api.query.SliceQuery;
-import org.kairosdb.core.KairosDataPointFactory;
+import com.datastax.driver.core.ResultSet;
+import com.datastax.driver.core.Row;
+import com.datastax.driver.core.Session;
+import com.datastax.driver.core.Statement;
+import com.datastax.driver.core.querybuilder.QueryBuilder;
+import com.google.common.collect.Lists;
+import com.google.common.util.concurrent.*;
 import org.kairosdb.core.datapoints.*;
-import org.kairosdb.core.datastore.Order;
 import org.kairosdb.core.datastore.QueryCallback;
-import org.kairosdb.util.KDataInput;
+import org.kairosdb.core.exception.DatastoreException;
+import org.kairosdb.util.MemoryMonitor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.util.ArrayList;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.*;
 
-import static org.kairosdb.datastore.cassandra.CassandraDatastore.*;
+import static com.datastax.driver.core.querybuilder.QueryBuilder.eq;
+import static com.datastax.driver.core.querybuilder.QueryBuilder.gte;
+import static com.datastax.driver.core.querybuilder.QueryBuilder.lte;
+import static com.google.common.base.Preconditions.checkNotNull;
 
-public class QueryRunner
-{
-	public static final DataPointsRowKeySerializer ROW_KEY_SERIALIZER = new DataPointsRowKeySerializer();
-
-	private Keyspace m_keyspace;
-	private String m_columnFamily;
-	private List<DataPointsRowKey> m_rowKeys;
-	private int m_startTime; //relative row time
-	private int m_endTime; //relative row time
-	private QueryCallback m_queryCallback;
-	private int m_singleRowReadSize;
-	private int m_multiRowReadSize;
-	private boolean m_limit = false;
-	private boolean m_descending = false;
-	private LongDataPointFactory m_longDataPointFactory = new LongDataPointFactoryImpl();
-	private DoubleDataPointFactory m_doubleDataPointFactory = new DoubleDataPointFactoryImpl();
-
-	private final KairosDataPointFactory m_kairosDataPointFactory;
-
-	public QueryRunner(Keyspace keyspace, String columnFamily,
-					   KairosDataPointFactory kairosDataPointFactory,
-					   List<DataPointsRowKey> rowKeys, long startTime, long endTime,
-					   QueryCallback csResult,
-					   int singleRowReadSize, int multiRowReadSize, int limit, Order order)
-	{
-		m_keyspace = keyspace;
-		m_columnFamily = columnFamily;
-		m_rowKeys = rowKeys;
-		m_kairosDataPointFactory = kairosDataPointFactory;
-		long m_tierRowTime = rowKeys.get(0).getTimestamp();
-		if (startTime < m_tierRowTime)
-			m_startTime = 0;
-		else
-			m_startTime = getColumnName(m_tierRowTime, startTime);
-
-		if (endTime > (m_tierRowTime + ROW_WIDTH))
-			m_endTime = getColumnName(m_tierRowTime, m_tierRowTime + ROW_WIDTH) +1;
-		else
-			m_endTime = getColumnName(m_tierRowTime, endTime) +1; //add 1 so we get 0x1 for last bit
-
-		m_queryCallback = csResult;
-		m_singleRowReadSize = singleRowReadSize;
-		m_multiRowReadSize = multiRowReadSize;
-
-		if (limit != 0)
-		{
-			m_limit = true;
-			m_singleRowReadSize = limit;
-			m_multiRowReadSize = limit;
-		}
-
-		if (order == Order.DESC)
-			m_descending = true;
-	}
-
-	public void runQuery() throws IOException
-	{
-		MultigetSliceQuery<DataPointsRowKey, Integer, byte[]> msliceQuery =
-				HFactory.createMultigetSliceQuery(m_keyspace,
-						ROW_KEY_SERIALIZER,
-						IntegerSerializer.get(), BytesArraySerializer.get());
-
-		msliceQuery.setColumnFamily(m_columnFamily);
-		msliceQuery.setKeys(m_rowKeys);
-		if (m_descending)
-			msliceQuery.setRange(m_endTime, m_startTime, true, m_multiRowReadSize);
-		else
-			msliceQuery.setRange(m_startTime, m_endTime, false, m_multiRowReadSize);
-
-		Rows<DataPointsRowKey, Integer, byte[]> rows =
-				msliceQuery.execute().get();
-
-		List<Row<DataPointsRowKey, Integer, byte[]>> unfinishedRows =
-				new ArrayList<Row<DataPointsRowKey, Integer, byte[]>>();
-
-		for (Row<DataPointsRowKey, Integer, byte[]> row : rows)
-		{
-			List<HColumn<Integer, byte[]>> columns = row.getColumnSlice().getColumns();
-			if (!m_limit && columns.size() == m_multiRowReadSize)
-				unfinishedRows.add(row);
-
-			writeColumns(row.getKey(), columns);
-		}
+public class QueryRunner {
+    private static final Logger LOG = LoggerFactory.getLogger(QueryRunner.class);
 
 
-		//Iterate through the unfinished rows and get the rest of the data.
-		//todo: use multiple threads to retrieve this data
-		for (Row<DataPointsRowKey, Integer, byte[]> unfinishedRow : unfinishedRows)
-		{
-			DataPointsRowKey key = unfinishedRow.getKey();
+    private final String keyspace;
+	private final String table;
+    private final Session session;
+	private final LocalDateTime startTime;
+	private final LocalDateTime endTime;
+    private final int startYear;
+    private final int endYear;
+	private final int singleRowReadSize;
+	private final int multiRowSize;
 
-			SliceQuery<DataPointsRowKey, Integer, byte[]> sliceQuery =
-					HFactory.createSliceQuery(m_keyspace, ROW_KEY_SERIALIZER,
-					IntegerSerializer.get(), BytesArraySerializer.get());
-
-			sliceQuery.setColumnFamily(m_columnFamily);
-			sliceQuery.setKey(key);
-
-			List<HColumn<Integer, byte[]>> columns = unfinishedRow.getColumnSlice().getColumns();
-
-			do
-			{
-				Integer lastTime = columns.get(columns.size() -1).getName();
-
-				if (m_descending)
-					sliceQuery.setRange(lastTime-1, m_startTime, true, m_singleRowReadSize);
-				else
-					sliceQuery.setRange(lastTime+1, m_endTime, false, m_singleRowReadSize);
-
-				columns = sliceQuery.execute().get().getColumns();
-				writeColumns(key, columns);
-			} while (columns.size() == m_singleRowReadSize);
-		}
-	}
+	private final QueryCallback queryCallback;
+	private final BlockingQueue<DataPointsRowKey> rowKeyQueue;
 
 
-	private void writeColumns(DataPointsRowKey rowKey, List<HColumn<Integer, byte[]>> columns)
-			throws IOException
-	{
-		if (columns.size() != 0)
-		{
-			Map<String, String> tags = rowKey.getTags();
-			String type = rowKey.getDataType();
+    private static final ThreadFactory DAEMON_THREAD_FACTORY =
+            new ThreadFactoryBuilder().setDaemon(true).build();
 
-			m_queryCallback.startDataPointSet(type, tags);
 
-			DataPointFactory dataPointFactory = null;
-			dataPointFactory = m_kairosDataPointFactory.getFactoryForDataStoreType(type);
+    private final ListeningExecutorService executor =
+            MoreExecutors.listeningDecorator(
+                    Executors.newFixedThreadPool(1, DAEMON_THREAD_FACTORY)
+            );
 
-			for (HColumn<Integer, byte[]> column : columns)
-			{
-				int columnTime = column.getName();
+    private final List<ListenableFuture<ResultSet>> listenableFutures;
 
-				byte[] value = column.getValue();
-				long timestamp = getColumnTimestamp(rowKey.getTimestamp(), columnTime);
+    private final MemoryMonitor memoryMonitor;
 
-				if (type == LegacyDataPointFactory.DATASTORE_TYPE)
-				{
-					if (isLongValue(columnTime))
-					{
-						m_queryCallback.addDataPoint(
-								new LegacyLongDataPoint(timestamp,
-										ValueSerializer.getLongFromByteBuffer(ByteBuffer.wrap(value))));
-					}
-					else
-					{
-						m_queryCallback.addDataPoint(
-								new LegacyDoubleDataPoint(timestamp,
-										ValueSerializer.getDoubleFromByteBuffer(ByteBuffer.wrap(value))));
-					}
-				}
-				else
-				{
-					m_queryCallback.addDataPoint(
-							dataPointFactory.getDataPoint(timestamp, KDataInput.createInput(value)));
-				}
-			}
-		}
-	}
 
+    private QueryRunner(Builder builder) {
+        this.session = builder.session;
+        this.keyspace = builder.keyspace;
+        this.table = builder.table;
+        this.singleRowReadSize = builder.singleRowReadSize;
+        this.multiRowSize = builder.multiRowSize;
+        this.queryCallback = builder.queryCallback;
+
+        this.rowKeyQueue = new ArrayBlockingQueue<>(builder.rowKeys.size());
+        this.rowKeyQueue.addAll(builder.rowKeys);
+
+        int size = Math.min(multiRowSize, rowKeyQueue.size());
+        listenableFutures = Lists.newArrayListWithCapacity(size);
+
+        this.startTime = Times.toLocalDateTime(builder.startTime);
+        this.endTime = Times.toLocalDateTime(builder.endTime);
+
+        this.startYear = Times.getSecondOfYear(this.startTime);
+        this.endYear = Times.getSecondOfYear(this.endTime);
+
+        this.memoryMonitor = new MemoryMonitor(1);
+    }
+
+    public static Builder builder(){
+        return new Builder();
+    }
+
+
+    private Statement createDataPointsQueryStatement(DataPointsRowKey rowKey){
+        int year = rowKey.getYear();
+        int startSecOfYear = startYear < year ? 0 : Times.getSecondOfYear(startTime);
+        int endSecOfYear = endYear > year ? Integer.MAX_VALUE : Times.getSecondOfYear(endTime);
+
+        return QueryBuilder
+                .select("sec_of_year", "value")
+                .from(keyspace, table)
+                .where(eq("metric", rowKey.getMetric()))
+                    .and(eq("tags", rowKey.getTagsString()))
+                    .and(eq("year", rowKey.getYear()))
+                    .and(gte("sec_of_year", startSecOfYear))
+                    .and(lte("sec_of_year", endSecOfYear))
+                .orderBy(QueryBuilder.asc("sec_of_year"))
+                .disableTracing();
+    }
+
+    private ListenableFuture<ResultSet> queryRowKey(DataPointsRowKey rowKey){
+        Statement statement = createDataPointsQueryStatement(rowKey)
+                .setFetchSize(singleRowReadSize);
+        return Futures.transform(
+                session.executeAsync(statement),
+                iterate(1, rowKey),
+                executor);
+    }
+
+    private  AsyncFunction<ResultSet, ResultSet> iterate(final int page,
+                                                         final DataPointsRowKey rowKey) {
+        return rs -> {
+            memoryMonitor.checkMemoryAndThrowException();
+            QueryRunner.this.writeRows(rowKey, rs.all());
+
+            boolean wasLastPage = rs.getExecutionInfo().getPagingState() == null;
+            if (wasLastPage) {
+                DataPointsRowKey nextRowKey = rowKeyQueue.poll();
+                if (nextRowKey != null) {
+                    return queryRowKey(nextRowKey);
+                } else {
+                    return Futures.immediateFuture(rs);
+                }
+            } else {
+                ListenableFuture<ResultSet> future = rs.fetchMoreResults();
+                return Futures.transform(future, iterate(page + 1, rowKey), executor);
+            }
+        };
+    }
+
+    private void writeRows(DataPointsRowKey rowKey,
+                           List<Row> rows)
+            throws IOException {
+        if (rows == null || rows.isEmpty()){
+            return;
+        }
+
+        Map<String, String> tags = rowKey.getTags();
+        queryCallback.startDataPointSet(LegacyDataPointFactory.DATASTORE_TYPE, tags);
+        for (Row r : rows) {
+            queryCallback.addDataPoint(
+                    new LegacyLongDataPoint(
+                            Times.toTimestamp(rowKey.getYear(), r.getShort(0)),
+                            r.getLong(1)
+                    ));
+        }
+    }
+
+
+    public void run() throws DatastoreException {
+        for (int i = 0; i < listenableFutures.size(); i++) {
+            listenableFutures.add(queryRowKey(rowKeyQueue.poll()));
+        }
+
+        for (ListenableFuture<ResultSet> future : listenableFutures) {
+            try {
+                future.get();
+            } catch (InterruptedException | ExecutionException e) {
+                LOG.error("query row key error", e);
+                throw new DatastoreException(e);
+            }
+        }
+    }
+
+
+    public static class Builder{
+        private String keyspace;
+        private String table;
+        private Session session;
+        private long startTime;
+        private long endTime;
+        private int singleRowReadSize;
+        private int multiRowSize;
+
+        private QueryCallback queryCallback;
+        private List<DataPointsRowKey> rowKeys;
+
+
+        private Builder(){}
+
+        public Builder session(Session session){
+            this.session = checkNotNull(session, "session");
+            return this;
+        }
+
+        public Builder table(String keyspace, String table){
+            this.keyspace = checkNotNull(keyspace, "keyspace");
+            this.table = checkNotNull(table, "table");
+            return this;
+        }
+
+        public Builder timeRange(long startTime, long endTime){
+            this.startTime = startTime;
+            this.endTime = endTime;
+            return this;
+        }
+
+        public Builder queryCallback(QueryCallback queryCallback){
+            this.queryCallback = checkNotNull(queryCallback, "queryCallback");
+            return this;
+        }
+
+        public Builder rowKeys(List<DataPointsRowKey> rowKeys){
+            this.rowKeys = checkNotNull(rowKeys, "rowKeys");
+            return this;
+        }
+
+        public Builder limit(int singleRowReadSize, int multiRowSize){
+            this.singleRowReadSize = singleRowReadSize;
+            this.multiRowSize = multiRowSize;
+            return this;
+        }
+
+        public QueryRunner build(){
+            checkNotNull(session, "session");
+            checkNotNull(keyspace, "keyspace");
+            checkNotNull(table, "table");
+            checkNotNull(queryCallback, "queryCallback");
+            checkNotNull(rowKeys, "rowKeys");
+
+            return new QueryRunner(this);
+        }
+    }
 }

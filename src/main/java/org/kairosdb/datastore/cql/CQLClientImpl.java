@@ -1,6 +1,7 @@
 package org.kairosdb.datastore.cql;
 
 import com.datastax.driver.core.Cluster;
+import com.datastax.driver.core.ConsistencyLevel;
 import com.datastax.driver.core.QueryOptions;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
@@ -11,18 +12,18 @@ import com.google.inject.name.Named;
 /**
  Created by bhawkins on 3/4/15.
  */
-public class CassandraClientImpl implements CassandraClient
+public class CQLClientImpl implements CQLClient
 {
-	public static final String KEYSPACE_PROPERTY = "kairosdb.datastore.cassandra.keyspace";
-	private static final String HOST_LIST_PROPERTY = "kairosdb.datastore.cassandra.host_list";
+	public static final String KEYSPACE_PROPERTY = "kairosdb.datastore.cql.keyspace";
+	private static final String HOST_LIST_PROPERTY = "kairosdb.datastore.cql.host_list";
 
 
 	private final Cluster m_cluster;
 	private String m_keyspace;
 
 	@Inject
-	public CassandraClientImpl(@Named(KEYSPACE_PROPERTY)String keyspace,
-			@Named(HOST_LIST_PROPERTY)String hostList)
+	public CQLClientImpl(@Named(KEYSPACE_PROPERTY)String keyspace,
+						 @Named(HOST_LIST_PROPERTY)String hostList)
 	{
 		final Cluster.Builder builder = new Cluster.Builder()
 				.withLoadBalancingPolicy(new TokenAwarePolicy(DCAwareRoundRobinPolicy.builder().build()))
@@ -37,12 +38,6 @@ public class CassandraClientImpl implements CassandraClient
 		m_keyspace = keyspace;
 	}
 
-
-	@Override
-	public Session getKeyspaceSession()
-	{
-		return m_cluster.connect(m_keyspace);
-	}
 
 	@Override
 	public Session getSession()

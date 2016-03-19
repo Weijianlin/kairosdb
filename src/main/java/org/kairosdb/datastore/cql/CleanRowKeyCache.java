@@ -18,10 +18,10 @@ import static org.quartz.TriggerBuilder.newTrigger;
  */
 public class CleanRowKeyCache implements KairosDBJob
 {
-	private CassandraDatastore m_datastore;
+	private CQLDatastore m_datastore;
 
 	@Inject
-	public CleanRowKeyCache(CassandraDatastore datastore)
+	public CleanRowKeyCache(CQLDatastore datastore)
 	{
 		m_datastore = datastore;
 	}
