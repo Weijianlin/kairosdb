@@ -22,6 +22,7 @@ import com.datastax.driver.core.Statement;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.*;
+import org.kairosdb.core.DataPoint;
 import org.kairosdb.core.datapoints.*;
 import org.kairosdb.core.datastore.QueryCallback;
 import org.kairosdb.core.exception.DatastoreException;
@@ -68,6 +69,7 @@ public class QueryRunner {
             );
 
     private final List<ListenableFuture<ResultSet>> listenableFutures;
+    private final int concurrentQueries;
 
     private final MemoryMonitor memoryMonitor;
 
@@ -83,8 +85,8 @@ public class QueryRunner {
         this.rowKeyQueue = new ArrayBlockingQueue<>(builder.rowKeys.size());
         this.rowKeyQueue.addAll(builder.rowKeys);
 
-        int size = Math.min(multiRowSize, rowKeyQueue.size());
-        listenableFutures = Lists.newArrayListWithCapacity(size);
+        this.concurrentQueries = Math.min(multiRowSize, rowKeyQueue.size());
+        this.listenableFutures = Lists.newArrayListWithCapacity(concurrentQueries);
 
         this.startTime = Times.toLocalDateTime(builder.startTime);
         this.endTime = Times.toLocalDateTime(builder.endTime);
@@ -101,7 +103,7 @@ public class QueryRunner {
 
 
     private Statement createDataPointsQueryStatement(DataPointsRowKey rowKey){
-        int year = rowKey.getYear();
+        short year = rowKey.getYear();
         int startSecOfYear = startYear < year ? 0 : Times.getSecondOfYear(startTime);
         int endSecOfYear = endYear > year ? Integer.MAX_VALUE : Times.getSecondOfYear(endTime);
 
@@ -159,7 +161,7 @@ public class QueryRunner {
         for (Row r : rows) {
             queryCallback.addDataPoint(
                     new LegacyLongDataPoint(
-                            Times.toTimestamp(rowKey.getYear(), r.getShort(0)),
+                            Times.toTimestamp(rowKey.getYear(), r.getInt(0)),
                             r.getLong(1)
                     ));
         }
@@ -167,8 +169,12 @@ public class QueryRunner {
 
 
     public void run() throws DatastoreException {
-        for (int i = 0; i < listenableFutures.size(); i++) {
-            listenableFutures.add(queryRowKey(rowKeyQueue.poll()));
+        for (int i = 0; i < concurrentQueries; i++) {
+            DataPointsRowKey rowKey = rowKeyQueue.poll();
+            if (rowKey == null){
+                break;
+            }
+            listenableFutures.add(queryRowKey(rowKey));
         }
 
         for (ListenableFuture<ResultSet> future : listenableFutures) {

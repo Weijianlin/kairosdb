@@ -58,4 +58,8 @@ public class CQLClientImpl implements CQLClient
 	}
 
 
+	public static void main(String[] args) {
+		new CQLClientImpl("s", "10.103.17.91,10.103.17.92,10.103.17.93");
+	}
+
 }

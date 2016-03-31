@@ -71,7 +71,7 @@ public class CQLDatastore implements Datastore {
 			"  year smallint,\n" +
 			"  tags set<text>,\n" +
 			"  PRIMARY KEY (metric, year)\n" +
-			") WITH COMPACT STORAGE";
+			")";
 
 	public static final String CREATE_STRING_INDEX_TABLE =
 			"CREATE TABLE IF NOT EXISTS %s." + TABLE_STRING_INDEX + " (\n" +
@@ -185,8 +185,9 @@ public class CQLDatastore implements Datastore {
 			                 int ttl)
             throws DatastoreException {
 		try {
-            LocalDateTime dateTime = Times.toLocalDateTime(dataPoint.getTimestamp());
+			LocalDateTime dateTime = Times.toLocalDateTime(dataPoint.getTimestamp());
 			int year = dateTime.getYear();
+
             int secondOfYear = Times.getSecondOfYear(dateTime);
 
             DataPointsRowKey rowKey = new DataPointsRowKey(metricName, year, tags);
@@ -338,21 +339,27 @@ public class CQLDatastore implements Datastore {
             throws DatastoreException {
         int singleSize = query.getLimit() != 0 ? query.getLimit() : singleRowReadSize;
 
-        QueryRunner queryRunner = QueryRunner.builder()
-                .session(session)
-                .table(keyspace, TABLE_DATA_POINTS)
-                .rowKeys(Lists.newArrayList(rowKeys))
-                .timeRange(query.getStartTime(), query.getEndTime())
-                .limit(singleSize, multiRowSize)
-                .queryCallback(queryCallback)
-                .build();
+        try {
+            QueryRunner queryRunner = QueryRunner.builder()
+                    .session(session)
+                    .table(keyspace, TABLE_DATA_POINTS)
+                    .rowKeys(Lists.newArrayList(rowKeys))
+                    .timeRange(query.getStartTime(), query.getEndTime())
+                    .limit(singleSize, multiRowSize)
+                    .queryCallback(queryCallback)
+                    .build();
 
-        queryRunner.run();
+            queryRunner.run();
+
+        } catch (Exception e){
+            logger.error("query error", e);
+            throw new DatastoreException(e);
+        }
 
         try {
             queryCallback.endDataPoints();
         } catch (IOException e) {
-            e.printStackTrace();
+            logger.error("query error", e);
         }
 	}
 
@@ -490,7 +497,7 @@ public class CQLDatastore implements Datastore {
                                              long startTime,
                                              long endTime,
                                              SetMultimap<String, String> filterTags) {
-            this.metric = metric;
+			this.metric = metric;
             if (startTime > endTime) { //swap startTime and endTime
                 startTime ^= endTime;
                 endTime ^= startTime;
@@ -501,6 +508,7 @@ public class CQLDatastore implements Datastore {
 
             this.filterTagList = filterTags.entries().stream()
                     .map(e -> e.getKey() + '=' + e.getValue()).collect(Collectors.toList());
+
 		}
 
         private int validYear(int year){
@@ -518,15 +526,15 @@ public class CQLDatastore implements Datastore {
 
             List<DataPointsRowKey> rowKeys = Lists.newArrayList();
             Statement statement = createMetricTagQueryStatement();
-            session.execute(statement).forEach(r -> {
-                int year = r.getShort(0);
+			session.execute(statement).forEach(r -> {
+                short year = r.getShort(0);
 				r.getSet(1, String.class).stream()
                         .filter(this::tagsWanted)
                         .forEach(tags -> rowKeys.add(new DataPointsRowKey(metric, year, tags)));
 			});
 
             ThreadReporter.addDataPoint(KEY_QUERY_TIME, System.currentTimeMillis() - startTime);
-            return rowKeys.iterator();
+			return rowKeys.iterator();
 		}
 
         private Statement createMetricTagQueryStatement() {
@@ -540,7 +548,7 @@ public class CQLDatastore implements Datastore {
         }
 
         private boolean tagsWanted(String tags) {
-            return filterTagList.stream().allMatch(tags::contains);
+			return filterTagList.stream().allMatch(tags::contains);
         }
 
 	}

@@ -15,7 +15,11 @@
  */
 package org.kairosdb.datastore.cql;
 
+import com.google.common.base.Joiner;
+import com.google.common.base.Splitter;
+import com.google.common.base.Strings;
 import com.google.common.collect.Maps;
+import org.kairosdb.core.exception.DatastoreException;
 import org.kairosdb.util.StringPool;
 
 import javax.validation.constraints.NotNull;
@@ -30,16 +34,16 @@ public class DataPointsRowKey {
 
 
     private final String metric;
-	private final int year;
+	private final short year;
     private final String tagsString;
 	private SortedMap<String, String> tags;
 
 
-	public DataPointsRowKey(String metric, int year) {
+	public DataPointsRowKey(String metric, short year) {
 		this(metric, year, "");
 	}
 
-	public DataPointsRowKey(String metric, int year,
+	public DataPointsRowKey(String metric, short year,
 			SortedMap<String, String> tags) {
 		this.metric = checkNotNullOrEmpty(metric);
 		this.year = year;
@@ -47,14 +51,29 @@ public class DataPointsRowKey {
         this.tagsString = generateTagString(tags);
 	}
 
-    public DataPointsRowKey(String metric, int year, String tagsString) {
+    public DataPointsRowKey(String metric, int year,
+                            SortedMap<String, String> tags) throws DatastoreException {
+        this(metric, (short)year, tags);
+        if (year > Short.MAX_VALUE){
+            throw new DatastoreException("data point's timestamp is larger than 32767 year");
+        }
+    }
+
+    public DataPointsRowKey(String metric, short year, String tagsString) {
         this.metric = checkNotNullOrEmpty(metric);
         this.year = year;
         this.tagsString = checkNotNull(tagsString, "tagsString");
     }
 
-	public void addTag(String name, String value)
-	{
+    public DataPointsRowKey(String metric, int year, String tagsString)
+            throws DatastoreException {
+        this(metric, (short)year, tagsString);
+        if (year > Short.MAX_VALUE){
+            throw new DatastoreException("data point's timestamp is larger than 32767 year");
+        }
+    }
+
+    public void addTag(String name, String value) {
 		tags.put(name, value);
 	}
 
@@ -69,7 +88,7 @@ public class DataPointsRowKey {
 		return tags;
 	}
 
-	public int getYear()
+	public short getYear()
 	{
 		return year;
 	}
@@ -78,6 +97,16 @@ public class DataPointsRowKey {
         return tagsString;
     }
 
+
+    @Override
+    public String toString() {
+        return "DataPointsRowKey{" +
+                "metric='" + metric + '\'' +
+                ", year=" + year +
+                ", tagsString='" + tagsString + '\'' +
+                ", tags=" + tags +
+                '}';
+    }
 
     @Override
     public boolean equals(Object o) {
@@ -105,55 +134,14 @@ public class DataPointsRowKey {
         return getString(sb.substring(0, sb.length() - 1));
     }
 
-    public static void extractTags(DataPointsRowKey rowKey, String tagString) {
-        int mark = 0;
-        int position = 0;
-        String tag = null;
-        String value;
-
-        for (position = 0; position < tagString.length(); position ++) {
-            if (tag == null) {
-                if (tagString.charAt(position) == '=') {
-                    tag = tagString.substring(mark, position);
-                    mark = position +1;
-                }
-            }
-            else {
-                if (tagString.charAt(position) == ':'){
-                    value = tagString.substring(mark, position);
-                    mark = position +1;
-
-                    rowKey.addTag(getString(tag), getString(value));
-                    tag = null;
-                }
-            }
-        }
-    }
-
     public static SortedMap<String, String> extractTags(String tagString){
         SortedMap<String, String> map = Maps.newTreeMap();
-        int mark = 0;
-        int position = 0;
-        String tag = null;
-        String value;
-
-        for (position = 0; position < tagString.length(); position ++) {
-            if (tag == null) {
-                if (tagString.charAt(position) == '=') {
-                    tag = tagString.substring(mark, position);
-                    mark = position +1;
+        Splitter.on(';').split(tagString).forEach(
+                s -> {
+                    int idx = s.indexOf('=');
+                    map.put(getString(s.substring(0, idx)), getString(s.substring(idx + 1, s.length())));
                 }
-            }
-            else {
-                if (tagString.charAt(position) == ':'){
-                    value = tagString.substring(mark, position);
-                    mark = position +1;
-
-                    map.put(getString(tag), getString(value));
-                    tag = null;
-                }
-            }
-        }
+        );
         return map;
     }
 
@@ -169,4 +157,5 @@ public class DataPointsRowKey {
         else
             return (str);
     }
+
 }

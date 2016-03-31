@@ -312,6 +312,9 @@ public class Main
 			}
 			catch (Exception e)
 			{
+				System.out.println("----------------");
+				System.out.println(e.getMessage());
+				e.printStackTrace(System.out);
 				logger.error("Failed starting up services", e);
 				//main.stopServices();
 				System.exit(0);

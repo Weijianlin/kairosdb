@@ -20,12 +20,12 @@ public class CQLConfiguration
 	public static final String MULTI_ROW_SIZE_PROPERTY = "kairosdb.datastore.cql.multi_row_size";
 
 
-	@Inject
-	@Named(WRITE_CONSISTENCY_LEVEL)
+//	@Inject
+//	@Named(WRITE_CONSISTENCY_LEVEL)
 	private ConsistencyLevel m_dataWriteLevel = ConsistencyLevel.QUORUM;
 
-	@Inject
-	@Named(READ_CONSISTENCY_LEVEL)
+//	@Inject
+//	@Named(READ_CONSISTENCY_LEVEL)
 	private ConsistencyLevel m_dataReadLevel = ConsistencyLevel.ONE;
 
 
