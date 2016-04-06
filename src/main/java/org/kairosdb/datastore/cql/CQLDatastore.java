@@ -104,10 +104,10 @@ public class CQLDatastore implements Datastore {
 	private int singleRowReadSize;
 	private int multiRowSize;
 
-	private DataCache<DataPointsRowKey> rowKeyCache = new DataCache<>(1024);
-	private DataCache<String> metricNameCache = new DataCache<>(1024);
-	private DataCache<String> tagNameCache = new DataCache<>(1024);
-	private DataCache<String> tagValueCache = new DataCache<>(1024);
+	private DataCache<DataPointsRowKey> rowKeyCache;
+	private DataCache<String> metricNameCache;
+	private DataCache<String> tagNameCache;
+	private DataCache<String> tagValueCache;
 
 
 

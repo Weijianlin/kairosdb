@@ -1,9 +1,6 @@
 package org.kairosdb.datastore.cql;
 
-import com.datastax.driver.core.Cluster;
-import com.datastax.driver.core.ConsistencyLevel;
-import com.datastax.driver.core.QueryOptions;
-import com.datastax.driver.core.Session;
+import com.datastax.driver.core.*;
 import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import com.datastax.driver.core.policies.TokenAwarePolicy;
 import com.google.inject.Inject;
@@ -25,9 +22,16 @@ public class CQLClientImpl implements CQLClient
 	public CQLClientImpl(@Named(KEYSPACE_PROPERTY)String keyspace,
 						 @Named(HOST_LIST_PROPERTY)String hostList)
 	{
+		PoolingOptions poolingOptions = new PoolingOptions()
+				.setConnectionsPerHost(HostDistance.LOCAL,  2, 4)
+				.setConnectionsPerHost(HostDistance.REMOTE,  2, 4)
+				.setMaxRequestsPerConnection(HostDistance.LOCAL, 500)
+				.setMaxRequestsPerConnection(HostDistance.REMOTE, 500);
+
 		final Cluster.Builder builder = new Cluster.Builder()
+				.withPoolingOptions(poolingOptions)
 				.withLoadBalancingPolicy(new TokenAwarePolicy(DCAwareRoundRobinPolicy.builder().build()))
-				.withQueryOptions(new QueryOptions().setConsistencyLevel(ConsistencyLevel.QUORUM));
+				.withQueryOptions(new QueryOptions().setConsistencyLevel(ConsistencyLevel.ONE));
 
 		for (String node : hostList.split(","))
 		{

@@ -129,6 +129,9 @@ public class DataPointsRowKey {
     }
 
     public static String generateTagString(SortedMap<String, String> tags) {
+        if (tags.isEmpty()){
+            return "";
+        }
         StringBuilder sb = new StringBuilder();
         tags.entrySet().forEach(e -> sb.append(e.getKey()).append('=').append(e.getValue()).append(';'));
         return getString(sb.substring(0, sb.length() - 1));

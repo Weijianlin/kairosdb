@@ -91,8 +91,8 @@ public class QueryRunner {
         this.startTime = Times.toLocalDateTime(builder.startTime);
         this.endTime = Times.toLocalDateTime(builder.endTime);
 
-        this.startYear = Times.getSecondOfYear(this.startTime);
-        this.endYear = Times.getSecondOfYear(this.endTime);
+        this.startYear = this.startTime.getYear();
+        this.endYear = this.endTime.getYear();
 
         this.memoryMonitor = new MemoryMonitor(1);
     }
