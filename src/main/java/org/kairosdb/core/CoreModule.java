@@ -80,6 +80,7 @@ public class CoreModule extends AbstractModule
 		bind(KairosDBScheduler.class).in(Singleton.class);
 		bind(MemoryMonitor.class).in(Singleton.class);
 
+		bind(AccumulateAggregator.class);
 		bind(SumAggregator.class);
 		bind(MinAggregator.class);
 		bind(MaxAggregator.class);
