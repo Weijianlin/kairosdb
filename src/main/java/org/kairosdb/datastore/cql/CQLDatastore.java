@@ -218,7 +218,7 @@ public class CQLDatastore implements Datastore {
                     .with(QueryBuilder.add("tags", rowKey.getTagsString()))
                     .where(eq("metric", rowKey.getMetric()))
                         .and(eq("year", rowKey.getYear()))
-                    .setConsistencyLevel(ConsistencyLevel.QUORUM);
+                    .setConsistencyLevel(ConsistencyLevel.LOCAL_ONE);
             session.executeAsync(statement);
         }
         return cachedKey;
@@ -275,7 +275,7 @@ public class CQLDatastore implements Datastore {
                 .and(eq("year", year))
                 .and(eq("sec_of_year", secondOfYear))
                 .with(incr("value", value))
-                .setConsistencyLevel(ConsistencyLevel.QUORUM);
+                .setConsistencyLevel(ConsistencyLevel.LOCAL_ONE);
 
         session.executeAsync(statement);
     }
@@ -339,21 +339,28 @@ public class CQLDatastore implements Datastore {
             throws DatastoreException {
         int singleSize = query.getLimit() != 0 ? query.getLimit() : singleRowReadSize;
 
-        try {
-            QueryRunner queryRunner = QueryRunner.builder()
-                    .session(session)
-                    .table(keyspace, TABLE_DATA_POINTS)
-                    .rowKeys(Lists.newArrayList(rowKeys))
-                    .timeRange(query.getStartTime(), query.getEndTime())
-                    .limit(singleSize, multiRowSize)
-                    .queryCallback(queryCallback)
-                    .build();
+		List<DataPointsRowKey> list = Lists.newArrayList(rowKeys);
+		if (!list.isEmpty()) {
+			QueryRunner queryRunner = null;
+			try {
+				queryRunner = QueryRunner.builder()
+						.session(session)
+						.table(keyspace, TABLE_DATA_POINTS)
+						.rowKeys(list)
+						.timeRange(query.getStartTime(), query.getEndTime())
+						.limit(singleSize, multiRowSize)
+						.queryCallback(queryCallback)
+						.build();
 
-            queryRunner.run();
-
-        } catch (Exception e){
-            logger.error("query error", e);
-            throw new DatastoreException(e);
+				queryRunner.run();
+			} catch (Exception e) {
+				logger.error("query error", e);
+				throw new DatastoreException(e);
+			} finally {
+                if (queryRunner != null){
+                    queryRunner.shutdown();
+                }
+            }
         }
 
         try {

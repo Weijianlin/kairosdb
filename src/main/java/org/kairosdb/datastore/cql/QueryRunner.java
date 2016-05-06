@@ -22,7 +22,6 @@ import com.datastax.driver.core.Statement;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.*;
-import org.kairosdb.core.DataPoint;
 import org.kairosdb.core.datapoints.*;
 import org.kairosdb.core.datastore.QueryCallback;
 import org.kairosdb.core.exception.DatastoreException;
@@ -39,6 +38,7 @@ import java.util.concurrent.*;
 import static com.datastax.driver.core.querybuilder.QueryBuilder.eq;
 import static com.datastax.driver.core.querybuilder.QueryBuilder.gte;
 import static com.datastax.driver.core.querybuilder.QueryBuilder.lte;
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 
 public class QueryRunner {
@@ -58,15 +58,12 @@ public class QueryRunner {
 	private final QueryCallback queryCallback;
 	private final BlockingQueue<DataPointsRowKey> rowKeyQueue;
 
-
     private static final ThreadFactory DAEMON_THREAD_FACTORY =
             new ThreadFactoryBuilder().setDaemon(true).build();
 
-
     private final ListeningExecutorService executor =
-            MoreExecutors.listeningDecorator(
-                    Executors.newFixedThreadPool(1, DAEMON_THREAD_FACTORY)
-            );
+           MoreExecutors.listeningDecorator(Executors.newFixedThreadPool(1, DAEMON_THREAD_FACTORY));
+
 
     private final List<ListenableFuture<ResultSet>> listenableFutures;
     private final int concurrentQueries;
@@ -188,6 +185,10 @@ public class QueryRunner {
     }
 
 
+    public void shutdown(){
+        this.executor.shutdown();
+    }
+
     public static class Builder{
         private String keyspace;
         private String table;
@@ -227,6 +228,7 @@ public class QueryRunner {
 
         public Builder rowKeys(List<DataPointsRowKey> rowKeys){
             this.rowKeys = checkNotNull(rowKeys, "rowKeys");
+            checkArgument(!rowKeys.isEmpty(), "rowKeys is emtpy");
             return this;
         }
 
@@ -242,6 +244,7 @@ public class QueryRunner {
             checkNotNull(table, "table");
             checkNotNull(queryCallback, "queryCallback");
             checkNotNull(rowKeys, "rowKeys");
+            checkArgument(!rowKeys.isEmpty(), "rowKeys is emtpy");
 
             return new QueryRunner(this);
         }
