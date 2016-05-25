@@ -21,7 +21,6 @@ import org.kairosdb.core.DataPoint;
 import org.kairosdb.core.aggregator.annotation.AggregatorName;
 import org.kairosdb.core.datapoints.DoubleDataPointFactory;
 
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
@@ -53,22 +52,74 @@ public class DeltaAggregator extends RangeAggregator
 
 	private class DeltaDataPointAggregator implements RangeSubAggregator {
 
+        final Double THRESHOLD = 0.0001;
+
+        private boolean equals(Double v1, Double v2) {
+            return Math.abs(v2 - v1) < THRESHOLD;
+        }
+
+        private boolean notMoreThan(Double v1, Double v2) {
+            return v1 < v2 || equals(v1, v2);
+        }
+
 		@Override
 		public Iterable<DataPoint> getNextDataPoints(long returnTime, Iterator<DataPoint> dataPointRange) {
-            List<DataPoint> results = Lists.newArrayList();
-            double pre = -1;
-            boolean first = true;
+			List<DataPoint> originDataPoints = Lists.newArrayList();
+			while (dataPointRange.hasNext()) {
+				originDataPoints.add(dataPointRange.next());
+			}
 
-            while (dataPointRange.hasNext()) {
-                DataPoint dataPoint = dataPointRange.next();
-                double cur = dataPoint.getDoubleValue();
-                double diff = first ? 0: cur - pre;
-                results.add(m_dataPointFactory.createDataPoint(dataPoint.getTimestamp(), diff));
-                first = false;
-                pre = cur;
-            }
+            // get the incremental sequence, because it is possible some data point with value 0
+			List<DataPoint> incDataPoints = Lists.newArrayList();
+            int preIndex = 0;
+            long totalGap = 0L;
+            int countGap = 0;
+			for (int i = 0; i < originDataPoints.size(); i++) {
+                DataPoint curDataPoint = originDataPoints.get(i);
+                if (!equals(curDataPoint.getDoubleValue(), 0.0)) {
+                    if (i == 0) {
+                        incDataPoints.add(curDataPoint);
+                        preIndex = 0;
+                    } else {
+                        DataPoint preDataPoint = originDataPoints.get(preIndex);
+                        if (notMoreThan(preDataPoint.getDoubleValue(), curDataPoint.getDoubleValue())) {
+                            incDataPoints.add(curDataPoint);
+                            if (preIndex == i - 1) {
+                                totalGap += curDataPoint.getTimestamp() - preDataPoint.getTimestamp();
+                                countGap++;
+                            }
+                            preIndex = i;
+                        }
+                    }
+                }
+			}
 
-            return results;
+            // calc the avg gap between inc sequence data points
+            Long AVG_GAP = countGap > 0 ? (totalGap / countGap) : (Long.MAX_VALUE / 5);
+
+            // calc the diff
+			List<DataPoint> results = Lists.newArrayList();
+			for (int i = 0; i < incDataPoints.size(); i++) {
+                DataPoint cur = incDataPoints.get(i);
+                double diff;
+                if (i == 0) {
+                    diff = 0;   // diff for the first element set to 0
+                }
+                else {
+                    DataPoint pre = incDataPoints.get(i-1);
+                    if (cur.getTimestamp() - pre.getTimestamp() > (AVG_GAP * 5)) {
+                        diff = 0;   // if the gap is large than 5 times of avg gap, take it as start of a new seg
+                    }
+                    else {
+                        diff = cur.getDoubleValue() - pre.getDoubleValue();
+                    }
+                }
+
+                if (diff > 0) {
+                    results.add(m_dataPointFactory.createDataPoint(cur.getTimestamp(), diff));
+                }
+			}
+			return results;
 		}
 	}
 }
