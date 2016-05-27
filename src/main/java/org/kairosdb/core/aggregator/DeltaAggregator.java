@@ -52,13 +52,13 @@ public class DeltaAggregator extends RangeAggregator
 
 	private class DeltaDataPointAggregator implements RangeSubAggregator {
 
-        final Double THRESHOLD = 0.0001;
+        final double THRESHOLD = 0.0001;
 
-        private boolean equals(Double v1, Double v2) {
+        private boolean equals(double v1, double v2) {
             return Math.abs(v2 - v1) < THRESHOLD;
         }
 
-        private boolean notMoreThan(Double v1, Double v2) {
+        private boolean notMoreThan(double v1, double v2) {
             return v1 < v2 || equals(v1, v2);
         }
 
@@ -69,6 +69,12 @@ public class DeltaAggregator extends RangeAggregator
 				originDataPoints.add(dataPointRange.next());
 			}
 
+            double lastValue = 0.0;
+            for (int i = originDataPoints.size()-1; i >= 0; i--) {
+                if (!equals((lastValue = originDataPoints.get(i).getDoubleValue()), 0.0))
+                    break;
+            }
+
             // get the incremental sequence, because it is possible some data point with value 0
 			List<DataPoint> incDataPoints = Lists.newArrayList();
             int preIndex = 0;
@@ -76,7 +82,7 @@ public class DeltaAggregator extends RangeAggregator
             int countGap = 0;
 			for (int i = 0; i < originDataPoints.size(); i++) {
                 DataPoint curDataPoint = originDataPoints.get(i);
-                if (!equals(curDataPoint.getDoubleValue(), 0.0)) {
+                if (notMoreThan(curDataPoint.getDoubleValue(), lastValue)) {
                     if (i == 0) {
                         incDataPoints.add(curDataPoint);
                         preIndex = 0;
