@@ -80,12 +80,14 @@ public class DeltaAggregator extends RangeAggregator
             int preIndex = 0;
             long totalGap = 0L;
             int countGap = 0;
+            boolean isFirst = true;
 			for (int i = 0; i < originDataPoints.size(); i++) {
                 DataPoint curDataPoint = originDataPoints.get(i);
                 if (notMoreThan(curDataPoint.getDoubleValue(), lastValue)) {
-                    if (i == 0) {
+                    if (isFirst) {
                         incDataPoints.add(curDataPoint);
-                        preIndex = 0;
+                        preIndex = i;
+                        isFirst = false;
                     } else {
                         DataPoint preDataPoint = originDataPoints.get(preIndex);
                         if (notMoreThan(preDataPoint.getDoubleValue(), curDataPoint.getDoubleValue())) {
