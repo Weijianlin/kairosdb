@@ -21,6 +21,8 @@ import org.kairosdb.core.DataPoint;
 import org.kairosdb.core.aggregator.annotation.AggregatorName;
 import org.kairosdb.core.datapoints.DoubleDataPointFactory;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
@@ -62,8 +64,13 @@ public class DeltaAggregator extends RangeAggregator
             return v1 < v2 || equals(v1, v2);
         }
 
-		@Override
-		public Iterable<DataPoint> getNextDataPoints(long returnTime, Iterator<DataPoint> dataPointRange) {
+        @Override
+        public Iterable<DataPoint> getNextDataPoints(long returnTime, Iterator<DataPoint> dataPointRange) {
+            return getNextDataPoints2(returnTime, dataPointRange);
+        }
+
+
+		public Iterable<DataPoint> getNextDataPoints1(long returnTime, Iterator<DataPoint> dataPointRange) {
 			List<DataPoint> originDataPoints = Lists.newArrayList();
 			while (dataPointRange.hasNext()) {
 				originDataPoints.add(dataPointRange.next());
@@ -129,5 +136,42 @@ public class DeltaAggregator extends RangeAggregator
 			}
 			return results;
 		}
+
+        public Iterable<DataPoint> getNextDataPoints2(long returnTime, Iterator<DataPoint> dataPointRange) {
+            // simple rules to trim some outliers:
+            // 1. diff of start point of a segment (some consecutive points) is 0
+            // 2. if the gap (the diff of timestamp) for a point is 4 times of previous avg gap,
+            //    take this point as a new start of a segment
+            // 3. trim the diff which is negative
+            // 4. trim the diff which is large than the 1/16 of the current value (for value > 10000)
+            if (!dataPointRange.hasNext()) {
+                return Collections.emptyList();
+            }
+
+            List<DataPoint> results = new ArrayList<>();
+
+            DataPoint pre = dataPointRange.next();
+            results.add(m_dataPointFactory.createDataPoint(pre.getTimestamp(), 0));
+
+            int count = 0;  // count for gaps
+            long gaps = 0L; // total of gaps
+            while (dataPointRange.hasNext()) {
+                DataPoint cur = dataPointRange.next();
+                double value = cur.getDoubleValue();
+                double diff = value - pre.getDoubleValue();
+                if (notMoreThan(0.0, diff) && (notMoreThan(value, 10000) || notMoreThan(diff , value / 16))) {
+                    long gap = cur.getTimestamp() - pre.getTimestamp();
+                    double delta = 0;
+                    if (count == 0 || gap < ((gaps / count) << 2)) { // 4 times of previous avg gap
+                        delta = diff;
+                        count ++;
+                        gaps += gap;
+                    }
+                    results.add(m_dataPointFactory.createDataPoint(cur.getTimestamp(), delta));
+                }
+                pre = cur;
+            }
+            return results;
+        }
 	}
 }
